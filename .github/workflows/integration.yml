@@ -1,0 +1,66 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, claude/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        cd mcp
+        pip install -r requirements.txt
+
+    - name: Start Docker Compose services
+      run: |
+        cd mcp
+        docker compose up --build -d
+      env:
+        MCP_DEV: "true"
+
+    - name: Wait for services to be ready
+      run: |
+        echo "Waiting for MCP server to be ready..."
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health > /dev/null 2>&1; then
+            echo "MCP server is ready"
+            break
+          fi
+          echo "Attempt $i: MCP server not ready yet..."
+          sleep 2
+        done
+
+        echo "Checking Redis..."
+        docker exec mcp-redis redis-cli ping
+
+    - name: Run integration tests
+      run: |
+        cd mcp
+        pytest tests/integration/ -v --tb=short
+
+    - name: Show logs on failure
+      if: failure()
+      run: |
+        echo "=== MCP Server Logs ==="
+        docker logs mcp-server
+        echo "=== Redis Logs ==="
+        docker logs mcp-redis
+
+    - name: Tear down Docker Compose
+      if: always()
+      run: |
+        cd mcp
+        docker compose down -v

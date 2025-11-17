@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Header, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 import jsonschema
@@ -37,17 +37,21 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Environment variables
+MCP_DEV = os.getenv("MCP_DEV", "").lower() == "true"
+MCP_API_KEY = os.getenv("MCP_API_KEY", "")
+
 # Initialize Redis client
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = RedisClient(REDIS_URL)
 
 # Load JSON schemas
-SCHEMA_DIR = Path(__file__).parent / "schemas"
+SCHEMA_DIR = Path(__file__).parent / "schemas" / "v1"
 SCHEMAS: Dict[str, Dict[str, Any]] = {}
 
 
 def load_schemas() -> None:
-    """Load all JSON schemas from the schemas directory."""
+    """Load all v1 JSON schemas from the schemas/v1 directory."""
     global SCHEMAS
 
     schema_files = {
@@ -70,6 +74,30 @@ def load_schemas() -> None:
 
 # Load schemas on startup
 load_schemas()
+
+
+# Authentication dependency
+async def verify_api_key(x_api_key: str = Header(None)) -> None:
+    """
+    Verify API key for production mode.
+
+    In dev mode (MCP_DEV=true), authentication is bypassed.
+    In production, requires x-api-key header matching MCP_API_KEY env var.
+
+    Args:
+        x_api_key: API key from x-api-key header
+
+    Raises:
+        HTTPException: 401 if authentication fails
+    """
+    if MCP_DEV:
+        return  # Skip auth in dev mode
+
+    if not MCP_API_KEY or x_api_key != MCP_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key"
+        )
 
 
 # Pydantic models for request/response
@@ -130,12 +158,13 @@ async def mcp_info():
     }
 
 
-@app.post("/tool/publish", response_model=PublishResponse, status_code=status.HTTP_200_OK)
+@app.post("/tool/publish", response_model=PublishResponse, status_code=status.HTTP_200_OK, dependencies=[Depends(verify_api_key)])
 async def publish_message(request: PublishRequest):
     """
     Publish a message to an MCP channel.
 
-    Validates the message against the channel's JSON schema before publishing.
+    Validates schema_version and message against the channel's JSON schema before publishing.
+    Requires authentication in production mode (x-api-key header).
 
     Args:
         request: PublishRequest with channel and message
@@ -154,6 +183,14 @@ async def publish_message(request: PublishRequest):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid channel '{channel}'. Valid channels: {list(RedisClient.VALID_CHANNELS)}"
+        )
+
+    # Validate schema_version field
+    message_version = message.get("schema_version")
+    if message_version != "v1":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid or missing schema_version. Expected 'v1', got '{message_version}'"
         )
 
     # Validate message against schema
@@ -206,10 +243,11 @@ async def list_collections():
     )
 
 
-@app.get("/tool/get_status", response_model=StatusResponse)
+@app.get("/tool/get_status", response_model=StatusResponse, dependencies=[Depends(verify_api_key)])
 async def get_status():
     """
     Get MCP server status and health information.
+    Requires authentication in production mode (x-api-key header).
 
     Returns:
         StatusResponse with Redis health, kill-switch status, and channel info

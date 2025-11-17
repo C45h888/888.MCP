@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Agent Signal Schema v1",
+  "description": "Published ONLY by Brain after statistical + ML evaluation. Contains trading signals.",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v1",
+      "description": "Schema version identifier"
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix timestamp in seconds"
+    },
+    "pair": {
+      "type": "string",
+      "description": "Trading pair identifier (e.g., BTC-ETH)",
+      "pattern": "^[A-Z]+-[A-Z]+$"
+    },
+    "action": {
+      "type": "string",
+      "description": "Trading action to execute",
+      "enum": ["LONG_SPREAD", "SHORT_SPREAD", "FLAT", "HOLD"]
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Model confidence score (0-1)",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "stop_loss_z": {
+      "type": "number",
+      "description": "Stop loss threshold in z-score units",
+      "minimum": 0
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable explanation for the signal"
+    }
+  },
+  "required": ["schema_version", "timestamp", "pair", "action", "confidence", "stop_loss_z", "reason"],
+  "additionalProperties": false
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Sentiment Data Schema v1",
+  "description": "Published by Feeder's RAG pipeline. Subscribed by Brain. Contains sentiment analysis results.",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v1",
+      "description": "Schema version identifier"
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix timestamp in seconds"
+    },
+    "source": {
+      "type": "string",
+      "description": "Source of sentiment data (e.g., Twitter, Reddit, News)"
+    },
+    "score": {
+      "type": "number",
+      "description": "Sentiment score from -1 (negative) to 1 (positive)",
+      "minimum": -1,
+      "maximum": 1
+    },
+    "summary": {
+      "type": "string",
+      "description": "One-sentence summary of the sentiment trigger"
+    }
+  },
+  "required": ["schema_version", "timestamp", "source", "score", "summary"],
+  "additionalProperties": false
+}

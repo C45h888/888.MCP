@@ -11,6 +11,7 @@ Tests cover:
 
 import pytest
 import json
+import os
 from datetime import datetime
 from fastapi.testclient import TestClient
 from unittest.mock import Mock, patch
@@ -20,7 +21,15 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from server import app
+# Set dev mode for tests (bypass auth by default)
+os.environ["MCP_DEV"] = "true"
+
+# Reload app to pick up env vars
+import importlib
+import server as server_module
+importlib.reload(server_module)
+app = server_module.app
+
 from redis_client import RedisClient
 
 # Test client
@@ -74,6 +83,7 @@ class TestPublishMessage:
         mock_publish.return_value = 2  # 2 subscribers
 
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886400,
             "pair": "BTC-ETH",
             "price_btc": 30000.0,
@@ -99,6 +109,7 @@ class TestPublishMessage:
         mock_publish.return_value = 1
 
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886405,
             "source": "Twitter",
             "score": 0.85,
@@ -121,6 +132,7 @@ class TestPublishMessage:
         mock_publish.return_value = 1
 
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886410,
             "command": "EMERGENCY_HALT",
             "reason": "USDT_DEPEG_DETECTED"
@@ -141,6 +153,7 @@ class TestPublishMessage:
         mock_publish.return_value = 1
 
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886415,
             "pair": "BTC-ETH",
             "action": "SHORT_SPREAD",
@@ -173,6 +186,7 @@ class TestPublishMessage:
     def test_publish_missing_required_field(self):
         """Test that message with missing required field is rejected."""
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886400,
             "pair": "BTC-ETH",
             # Missing price_btc, price_eth, volume_btc
@@ -189,6 +203,7 @@ class TestPublishMessage:
     def test_publish_invalid_field_type(self):
         """Test that message with invalid field type is rejected."""
         message = {
+            "schema_version": "v1",
             "timestamp": "not-a-number",  # Should be integer
             "pair": "BTC-ETH",
             "price_btc": 30000.0,
@@ -206,6 +221,7 @@ class TestPublishMessage:
     def test_publish_additional_properties_rejected(self):
         """Test that additional properties are rejected (additionalProperties: false)."""
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886400,
             "pair": "BTC-ETH",
             "price_btc": 30000.0,
@@ -224,6 +240,7 @@ class TestPublishMessage:
     def test_publish_sentiment_score_out_of_range(self):
         """Test that sentiment score outside [-1, 1] is rejected."""
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886405,
             "source": "Twitter",
             "score": 1.5,  # Out of range
@@ -240,6 +257,7 @@ class TestPublishMessage:
     def test_publish_invalid_control_command(self):
         """Test that invalid control command is rejected."""
         message = {
+            "schema_version": "v1",
             "timestamp": 1678886410,
             "command": "INVALID_COMMAND",  # Not in enum
             "reason": "Test"
@@ -251,6 +269,69 @@ class TestPublishMessage:
         )
 
         assert response.status_code == 422
+
+    def test_publish_missing_schema_version(self):
+        """Test that message without schema_version is rejected."""
+        message = {
+            # Missing schema_version
+            "timestamp": 1678886400,
+            "pair": "BTC-ETH",
+            "price_btc": 30000.0,
+            "price_eth": 2000.0,
+            "volume_btc": 150.5
+        }
+
+        response = client.post(
+            "/tool/publish",
+            json={"channel": "market:data", "message": message}
+        )
+
+        assert response.status_code == 400
+        assert "schema_version" in response.json()["detail"].lower()
+
+    def test_publish_wrong_schema_version(self):
+        """Test that message with wrong schema_version is rejected."""
+        message = {
+            "schema_version": "v2",  # Wrong version
+            "timestamp": 1678886400,
+            "pair": "BTC-ETH",
+            "price_btc": 30000.0,
+            "price_eth": 2000.0,
+            "volume_btc": 150.5
+        }
+
+        response = client.post(
+            "/tool/publish",
+            json={"channel": "market:data", "message": message}
+        )
+
+        assert response.status_code == 400
+        assert "schema_version" in response.json()["detail"].lower()
+
+
+class TestAuthentication:
+    """Test API key authentication."""
+
+    def test_dev_mode_bypasses_auth(self):
+        """Test that MCP_DEV=true allows requests without API key."""
+        # Already set in module-level setup
+        message = {
+            "schema_version": "v1",
+            "timestamp": 1678886400,
+            "pair": "BTC-ETH",
+            "price_btc": 30000.0,
+            "price_eth": 2000.0,
+            "volume_btc": 150.5
+        }
+
+        with patch('server.redis_client.publish', return_value=1):
+            response = client.post(
+                "/tool/publish",
+                json={"channel": "market:data", "message": message}
+            )
+
+        # Should succeed even without x-api-key header
+        assert response.status_code == 200
 
 
 class TestGetStatus:
