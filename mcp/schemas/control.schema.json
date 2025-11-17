@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Agent Control Schema",
+  "description": "Published by external kill-switch or monitoring system. Subscribed by Brain. Contains control commands.",
+  "properties": {
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix timestamp in seconds"
+    },
+    "command": {
+      "type": "string",
+      "description": "Control command to execute",
+      "enum": ["EMERGENCY_HALT", "RESUME", "PAUSE"]
+    },
+    "reason": {
+      "type": "string",
+      "description": "Reason for the control command"
+    }
+  },
+  "required": ["timestamp", "command", "reason"],
+  "additionalProperties": false
+}
