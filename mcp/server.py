@@ -12,16 +12,17 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, status, Header, Depends
+from fastapi import FastAPI, HTTPException, status, Header, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 import jsonschema
 from jsonschema import validate, ValidationError as JSONSchemaValidationError
 
 from redis_client import RedisClient
+from retrieval import retrieve_historical_data, is_retrieval_enabled, MAX_RETRIEVE_LIMIT
 
 # Configure logging
 logging.basicConfig(
@@ -128,6 +129,21 @@ class CollectionsResponse(BaseModel):
     """Response model for listing available channels."""
     channels: List[str]
     total: int
+
+
+class RetrieveRequest(BaseModel):
+    """Request model for historical data retrieval."""
+    collection: str
+    pair: Optional[str] = None
+    from_timestamp: Optional[int] = None
+    to_timestamp: Optional[int] = None
+    limit: int = 100
+
+
+class SearchRAGRequest(BaseModel):
+    """Request model for RAG search."""
+    query: str
+    k: int = 5
 
 
 # Endpoints
@@ -266,6 +282,118 @@ async def get_status():
         kill_switch=kill_switch,
         channels=channels,
         timestamp=int(datetime.now().timestamp())
+    )
+
+
+@app.post("/tool/retrieve")
+async def retrieve(
+    request: Request,
+    retrieve_request: RetrieveRequest
+):
+    """
+    Retrieve historical messages from S3 storage.
+
+    Requires S3_DATA_BUCKET configuration. Returns 501 if not configured.
+    Enforces pagination limits and timestamp filtering for safety.
+
+    Args:
+        request: FastAPI Request object
+        retrieve_request: Retrieval parameters
+
+    Returns:
+        Dict with messages array and metadata
+
+    Raises:
+        HTTPException: 501 if S3 not configured, 400 for invalid params, 500 for errors
+    """
+    # Check if retrieval is enabled
+    if not is_retrieval_enabled():
+        logger.warning("Retrieval attempted but S3 not configured")
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Historical data retrieval not configured. Set S3_DATA_BUCKET and AWS credentials."
+        )
+
+    # Validate collection
+    if retrieve_request.collection not in RedisClient.VALID_CHANNELS:
+        logger.warning(f"Invalid collection for retrieval: {retrieve_request.collection}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid collection. Must be one of: {list(RedisClient.VALID_CHANNELS)}"
+        )
+
+    # Enforce limit cap
+    if retrieve_request.limit > MAX_RETRIEVE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Limit exceeds maximum allowed ({MAX_RETRIEVE_LIMIT})"
+        )
+
+    try:
+        messages = retrieve_historical_data(
+            collection=retrieve_request.collection,
+            pair=retrieve_request.pair,
+            from_timestamp=retrieve_request.from_timestamp,
+            to_timestamp=retrieve_request.to_timestamp,
+            limit=retrieve_request.limit
+        )
+
+        logger.info(
+            f"Retrieval successful: {len(messages)} messages",
+            extra={
+                'collection': retrieve_request.collection,
+                'count': len(messages)
+            }
+        )
+
+        return {
+            "messages": messages,
+            "count": len(messages),
+            "collection": retrieve_request.collection,
+            "filters": {
+                "pair": retrieve_request.pair,
+                "from_timestamp": retrieve_request.from_timestamp,
+                "to_timestamp": retrieve_request.to_timestamp,
+                "limit": retrieve_request.limit
+            }
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
+    except Exception as e:
+        logger.error(f"Retrieval failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Retrieval failed: {str(e)}"
+        )
+
+
+@app.post("/tool/search_rag")
+async def search_rag(
+    request: Request,
+    search_request: SearchRAGRequest
+):
+    """
+    Search RAG knowledge base (placeholder for future vector DB integration).
+
+    Currently returns 501 Not Implemented. This endpoint is reserved for
+    future integration with vector databases (Pinecone, Weaviate, etc.) for
+    semantic search over historical market data and sentiment.
+
+    Args:
+        request: FastAPI Request object
+        search_request: Search parameters (query, k)
+
+    Returns:
+        501 Not Implemented
+    """
+    logger.info(
+        f"RAG search attempted (not yet implemented): {search_request.query}"
+    )
+
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="RAG search not yet implemented. Future integration planned for vector database (Pinecone/Weaviate)."
     )
 
 

@@ -190,3 +190,26 @@ class TestEmergencyHalt:
         kill_switch = json.loads(kill_switch_data)
         assert kill_switch["active"] is True
         assert "USDT depeg" in kill_switch["reason"]
+
+
+class TestRetrievalEndpoint:
+    """Test retrieval endpoint integration."""
+
+    def test_retrieve_returns_501_without_s3(self, wait_for_services):
+        """Test that retrieve endpoint returns 501 when S3 not configured."""
+        retrieve_request = {
+            "collection": "market:data",
+            "pair": "BTC-ETH",
+            "from_timestamp": 1678886000,
+            "to_timestamp": 1678886500,
+            "limit": 50
+        }
+
+        response = requests.post(
+            f"{MCP_BASE_URL}/tool/retrieve",
+            json=retrieve_request
+        )
+
+        # Should return 501 since S3_DATA_BUCKET not configured in test env
+        assert response.status_code == 501
+        assert "not configured" in response.json()["detail"].lower()

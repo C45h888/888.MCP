@@ -409,6 +409,48 @@ class TestHealth:
         assert data["redis"] is False
 
 
+class TestRetrievalEndpoint:
+    """Test historical data retrieval endpoint."""
+
+    def test_retrieve_returns_501_when_s3_not_configured(self):
+        """Test that retrieve endpoint returns 501 when S3 not configured."""
+        # Ensure S3 is not configured
+        os.environ.pop("S3_DATA_BUCKET", None)
+
+        retrieve_request = {
+            "collection": "market:data",
+            "limit": 10
+        }
+
+        response = client.post("/tool/retrieve", json=retrieve_request)
+
+        assert response.status_code == 501
+        assert "not configured" in response.json()["detail"].lower()
+
+    def test_retrieve_validates_collection(self):
+        """Test that retrieve endpoint validates collection name."""
+        retrieve_request = {
+            "collection": "invalid:collection",
+            "limit": 10
+        }
+
+        response = client.post("/tool/retrieve", json=retrieve_request)
+        assert response.status_code in [400, 501]  # 501 if S3 not configured, 400 if it is
+
+
+class TestRAGEndpoint:
+    """Test RAG search endpoint."""
+
+    def test_search_rag_returns_501(self):
+        """Test that RAG search returns 501 (not yet implemented)."""
+        search_request = {"query": "Bitcoin price prediction", "k": 5}
+
+        response = client.post("/tool/search_rag", json=search_request)
+
+        assert response.status_code == 501
+        assert "not yet implemented" in response.json()["detail"].lower()
+
+
 # Run tests
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

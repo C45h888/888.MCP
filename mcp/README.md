@@ -43,6 +43,10 @@ The MCP Server acts as the "Central Nervous System" for a three-agent trading sy
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL |
 | `MCP_DEV` | No | `false` | Set to `true` to disable authentication (dev mode) |
 | `MCP_API_KEY` | Production only | - | API key for production authentication |
+| `S3_DATA_BUCKET` | No | - | S3 bucket name for historical data storage (enables `/tool/retrieve`) |
+| `AWS_ACCESS_KEY_ID` | No | - | AWS credentials for S3 access (standard boto3 env var) |
+| `AWS_SECRET_ACCESS_KEY` | No | - | AWS credentials for S3 access (standard boto3 env var) |
+| `AWS_REGION` | No | `us-east-1` | AWS region for S3 bucket |
 
 ### Using Docker Compose (Recommended)
 
@@ -215,6 +219,111 @@ GET /health
 ```
 Simple health check for monitoring.
 
+### 6. Retrieve Historical Data
+```bash
+POST /tool/retrieve
+```
+Retrieve historical messages from S3 storage with timestamp and pair filtering.
+
+**Note:** Requires `S3_DATA_BUCKET` and AWS credentials to be configured. Returns 501 if S3 not configured.
+
+**Request:**
+```json
+{
+  "collection": "market:data",
+  "pair": "BTC-ETH",
+  "from_timestamp": 1678886000,
+  "to_timestamp": 1678886500,
+  "limit": 100
+}
+```
+
+**Parameters:**
+- `collection` (required): Channel name (`market:data`, `sentiment:data`, etc.)
+- `pair` (optional): Filter by trading pair (e.g., `BTC-ETH`)
+- `from_timestamp` (optional): Unix timestamp - start of time range
+- `to_timestamp` (optional): Unix timestamp - end of time range
+- `limit` (optional): Maximum results to return (default: 100, max: 1000)
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/tool/retrieve \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "collection": "market:data",
+    "pair": "BTC-ETH",
+    "from_timestamp": 1678886000,
+    "to_timestamp": 1678886500,
+    "limit": 50
+  }'
+```
+
+**Response (S3 configured):**
+```json
+{
+  "messages": [
+    {
+      "schema_version": "v1",
+      "timestamp": 1678886400,
+      "pair": "BTC-ETH",
+      "price_btc": 30000.0,
+      "price_eth": 2000.0,
+      "volume_btc": 150.5
+    }
+  ],
+  "count": 1,
+  "collection": "market:data",
+  "filters": {
+    "pair": "BTC-ETH",
+    "from_timestamp": 1678886000,
+    "to_timestamp": 1678886500,
+    "limit": 50
+  }
+}
+```
+
+**Response (S3 not configured):**
+```json
+{
+  "detail": "Historical data retrieval not configured. Set S3_DATA_BUCKET and AWS credentials."
+}
+```
+Status: 501 Not Implemented
+
+**Safety Limits:**
+- Maximum `limit`: 1000 messages per request
+- Enforces pagination to prevent memory issues
+- Validates collection names against allowed channels
+
+### 7. Search RAG Knowledge Base
+```bash
+POST /tool/search_rag
+```
+Search historical data using semantic similarity (placeholder for future vector DB integration).
+
+**Note:** Currently returns 501 Not Implemented. Reserved for future integration with Pinecone, Weaviate, or similar vector databases.
+
+**Request:**
+```json
+{
+  "query": "What was BTC price when sentiment was bullish?",
+  "k": 5
+}
+```
+
+**Parameters:**
+- `query` (required): Natural language search query
+- `k` (optional): Number of results to return (default: 5)
+
+**Response:**
+```json
+{
+  "detail": "RAG search not yet implemented. Future integration planned for vector database (Pinecone/Weaviate)."
+}
+```
+Status: 501 Not Implemented
+
 ---
 
 ## 📡 MCP Channels & Schemas
@@ -331,9 +440,15 @@ docker-compose down
 
 **CI/CD:**
 
-GitHub Actions workflow automatically runs integration tests on every push to `main` or `claude/**` branches.
+GitHub Actions workflow automatically runs all tests on every push to `main`, `claude/**`, or `develop` branches.
 
-See `.github/workflows/integration.yml` for details.
+The CI pipeline includes:
+- Linting with flake8
+- Unit tests
+- Integration tests with docker-compose
+- Docker build validation
+
+See `.github/workflows/ci.yml` for details.
 
 **Test Coverage:**
 - ✅ Schema validation (all 4 channels)
@@ -376,9 +491,64 @@ See `.github/workflows/integration.yml` for details.
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| (See table in Quick Start section) | | |
+See the full table in the Quick Start section above.
+
+### S3 Historical Data Storage (Optional)
+
+To enable historical data retrieval via `/tool/retrieve`, configure S3 storage:
+
+**1. Create S3 Bucket:**
+```bash
+# Using AWS CLI
+aws s3 mb s3://my-mcp-data-bucket --region us-east-1
+```
+
+**2. Set Environment Variables:**
+```bash
+export S3_DATA_BUCKET="my-mcp-data-bucket"
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_REGION="us-east-1"
+```
+
+**3. Update Docker Compose:**
+```yaml
+# docker-compose.yml
+services:
+  mcp-server:
+    environment:
+      - S3_DATA_BUCKET=my-mcp-data-bucket
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=us-east-1
+```
+
+**4. Verify Configuration:**
+```bash
+# Test retrieval endpoint
+curl -X POST http://localhost:8080/tool/retrieve \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"collection":"market:data","limit":10}'
+
+# Should return data if S3 configured, or 501 if not
+```
+
+**S3 Bucket Structure:**
+
+The retrieval module expects messages stored in S3 with this structure:
+```
+s3://my-mcp-data-bucket/
+  market:data/
+    2024/03/
+      btc-eth-20240315.json
+      btc-eth-20240316.json
+  sentiment:data/
+    2024/03/
+      sentiment-20240315.json
+```
+
+**Note:** Data archival to S3 must be handled by your data pipeline (external to MCP Server). The retrieval endpoint only reads from S3.
 
 ### Docker Compose Configuration
 
@@ -387,6 +557,7 @@ Edit `docker-compose.yml` to customize:
 - Redis persistence settings
 - Resource limits
 - Network configuration
+- S3 credentials (see above)
 
 ---
 
@@ -419,6 +590,9 @@ redis-cli ping
 
 # Check port 8080 is available
 lsof -i :8080
+
+# Check Docker logs
+docker-compose logs mcp-server
 ```
 
 ### Schema validation failing
@@ -428,21 +602,103 @@ python -c "
 import json
 import jsonschema
 
-with open('schemas/market.schema.json') as f:
+with open('schemas/v1/market.schema.json') as f:
     schema = json.load(f)
 
-message = {...}  # Your message
+message = {
+    'schema_version': 'v1',
+    'timestamp': 1678886400,
+    'pair': 'BTC-ETH',
+    'price_btc': 30000.0,
+    'price_eth': 2000.0,
+    'volume_btc': 150.5
+}
 jsonschema.validate(instance=message, schema=schema)
+print('Valid!')
 "
 ```
+
+**Common schema errors:**
+- Missing `schema_version` field → Add `"schema_version": "v1"`
+- Wrong schema version → Use `"v1"`, not `"v2"` or other versions
+- Extra fields → Remove fields not in schema (schemas use `additionalProperties: false`)
+- Wrong data types → Check timestamps are integers, prices are floats, etc.
 
 ### Kill-switch stuck
 ```bash
 # Check kill-switch state
 redis-cli GET mcp:kill_switch
 
-# Manually clear kill-switch
+# View the JSON content
+redis-cli GET mcp:kill_switch | python -m json.tool
+
+# Manually clear kill-switch (use with caution!)
 redis-cli DEL mcp:kill_switch
+```
+
+### Retrieval endpoint returns 501
+This is expected when S3 is not configured.
+
+**Fix:**
+```bash
+# Set required environment variables
+export S3_DATA_BUCKET="your-bucket-name"
+export AWS_ACCESS_KEY_ID="your-key"
+export AWS_SECRET_ACCESS_KEY="your-secret"
+
+# Restart server
+docker-compose restart mcp-server
+
+# Or for local development
+python server.py
+```
+
+**Verify S3 credentials:**
+```bash
+# Test AWS credentials
+aws s3 ls s3://your-bucket-name/
+
+# Test from Python
+python -c "
+import boto3
+s3 = boto3.client('s3')
+response = s3.list_objects_v2(Bucket='your-bucket-name', MaxKeys=1)
+print('S3 connection OK!')
+"
+```
+
+### Authentication failing (401 errors)
+```bash
+# Check if dev mode is enabled
+curl http://localhost:8080/health
+# If this works but /tool/get_status returns 401, authentication is required
+
+# Enable dev mode (development only!)
+export MCP_DEV=true
+docker-compose restart mcp-server
+
+# Or set API key
+export MCP_API_KEY="your-secure-key"
+docker-compose restart mcp-server
+
+# Test with API key
+curl -H "x-api-key: your-secure-key" http://localhost:8080/tool/get_status
+```
+
+### Integration tests failing
+```bash
+# Make sure services are running
+docker-compose up -d
+
+# Wait for services to be ready
+sleep 5
+
+# Run tests
+pytest tests/integration/ -v
+
+# Check service logs if failing
+docker-compose logs redis
+docker-compose logs mcp-server
 ```
 
 ---
@@ -453,17 +709,25 @@ redis-cli DEL mcp:kill_switch
 mcp/
 ├── server.py                    # FastAPI application
 ├── redis_client.py              # Redis pub/sub wrapper
+├── retrieval.py                 # S3 historical data retrieval
 ├── schemas/
-│   ├── market.schema.json       # market:data schema
-│   ├── sentiment.schema.json    # sentiment:data schema
-│   ├── control.schema.json      # agent:control schema
-│   └── signal.schema.json       # agent:signal schema
+│   └── v1/
+│       ├── market.schema.json       # market:data schema
+│       ├── sentiment.schema.json    # sentiment:data schema
+│       ├── control.schema.json      # agent:control schema
+│       └── signal.schema.json       # agent:signal schema
 ├── tests/
-│   └── test_endpoints.py        # Pytest test suite
+│   ├── test_endpoints.py        # Unit tests
+│   └── integration/
+│       └── test_integration.py  # Docker-based integration tests
 ├── Dockerfile                   # Container definition
 ├── docker-compose.yml           # Multi-service orchestration
 ├── requirements.txt             # Python dependencies
 └── README.md                    # This file
+
+.github/
+└── workflows/
+    └── ci.yml                   # GitHub Actions CI/CD pipeline
 ```
 
 ---
