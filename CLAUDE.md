@@ -1,4 +1,6 @@
-# CLAUDE.md — Project Architecture & Rules for Claude Code
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 This file defines the complete system context, architectural boundaries, operational rules, and tool/governance guidelines for Claude Code.
 Claude MUST follow these instructions at all times when working inside this repository.
@@ -96,11 +98,17 @@ Published ONLY by the Brain after statistical + ML evaluation.
 Claude Code is responsible for:
 
 ### ✔ Building the Core MCP Server
-- Redis pub/sub wrapper
-- Health endpoints
-- Channel schema validation
+- Redis pub/sub wrapper (`redis_client.py`)
+- Health and status endpoints
+- Channel schema validation (strict, version-enforced)
 - Logging, error-handling, and safe publishing utilities
-- Developer tooling scripts
+- **Historical data retrieval** (`retrieval.py`) - S3/Parquet/JSONL with cursor pagination
+- **Background uploader/archiver** (`uploader/archiver.py`) - Batched S3 uploads with local fallback
+- **Parquet tooling** (`tooling/s3_parquet.py`) - Streaming reader with JSONL fallback
+- **RAG endpoint placeholder** (`/tool/search_rag`) - Vector DB integration hooks
+- Developer tooling scripts (`scripts/seed_minio.py`)
+- CI/CD workflows (GitHub Actions with MinIO-based S3 testing)
+- Deployment manifests (`render.yaml`, `docker-compose*.yml`)
 
 ### ✔ Building the Brain Agent (Python)
 The Brain has four internal layers (from architecture):
@@ -125,12 +133,15 @@ These rules override all other instructions.
 
 ## 🟥 DO NOT
 
-❌ Modify JSON schemas
-❌ Publish to MCP channels not specified
-❌ Generate n8n workflow files automatically
-❌ Introduce new fields into MCP messages
-❌ Build trading logic outside the Policy Layer
+❌ Modify JSON schemas in `schemas/v1/` (breaks all agents)
+❌ Publish to MCP channels not specified (only 4 channels allowed)
+❌ Generate n8n workflow files automatically (Feeder is external)
+❌ Introduce new fields into MCP messages (violates schema contract)
+❌ Build trading logic outside the Policy Layer (Brain architecture is sacred)
 ❌ Use any model other than the offline-trained `brain_model.h5`
+❌ Delete archived data from S3 or local storage (append-only, no deletion)
+❌ Change channel names (`market:data`, `sentiment:data`, `agent:control`, `agent:signal`)
+❌ Skip schema_version field in messages (all messages MUST have `"schema_version": "v1"`)
 
 ## 🟩 MUST
 
@@ -153,14 +164,32 @@ Claude Code should maintain this structure during development:
 
 ```
 /mcp/
-    server.py
-    redis_client.py
+    server.py                   # FastAPI MCP server with pub/sub endpoints
+    redis_client.py             # Redis pub/sub wrapper
+    retrieval.py                # S3 historical data retrieval with Parquet support
+    uploader/
+        archiver.py             # Background worker for batched S3 uploads
+    tooling/
+        s3_parquet.py           # Parquet/JSONL reader with streaming
     schemas/
-        market.schema.json
-        sentiment.schema.json
-        control.schema.json
-        signal.schema.json
-/brain/
+        v1/                     # Schema versioning (all messages require v1)
+            market.schema.json
+            sentiment.schema.json
+            control.schema.json
+            signal.schema.json
+    tests/
+        test_endpoints.py       # Unit tests for server endpoints
+        test_uploader.py        # Unit tests for archiver
+        test_parquet.py         # Unit tests for Parquet/JSONL reading
+        integration/
+            test_integration.py
+            test_s3_retrieve.py # MinIO-based S3 integration tests
+    docker-compose.yml          # Production: Redis + MCP server
+    docker-compose.ci.yml       # CI: Redis + MinIO + MCP server
+    Dockerfile
+    requirements.txt
+
+/brain/                         # ⚠️ NOT YET IMPLEMENTED
     listener.py
     stat_layer.py
     predictive_layer.py
@@ -171,15 +200,22 @@ Claude Code should maintain this structure during development:
         df_sentiment.pkl
     models/
         brain_model.h5
-/offline_trainer/
+
+/offline_trainer/               # ⚠️ NOT YET IMPLEMENTED
     trainer.py
     feature_builder.py
     wfa.py
     evaluation.py
-/docs/
-    architecture/
-    mcp_contracts.md
-    brain_design.md
+
+/scripts/
+    seed_minio.py               # MinIO test data seeder for CI
+
+.github/
+    workflows/
+        ci.yml                  # Main CI: lint, unit, integration, Docker build
+        ci-s3.yml               # S3 integration tests with MinIO
+
+render.yaml                     # Render.com deployment manifest
 ```
 
 ---
@@ -235,7 +271,84 @@ When Claude Code is writing code:
 
 ---
 
-# 📌 9. PROMPTS FOR CLAUDE CODE TO USE INTERNALLY
+# 📌 9. COMMON DEVELOPMENT COMMANDS
+
+### Testing
+
+```bash
+# Unit tests (fast, no external dependencies)
+cd /home/user/888.MCP/mcp
+pytest tests/test_endpoints.py -v
+pytest tests/test_uploader.py -v
+pytest tests/test_parquet.py -v
+
+# Integration tests (requires docker-compose)
+docker-compose up -d
+pytest tests/integration/ -v
+docker-compose down
+
+# S3/MinIO integration tests
+docker-compose -f docker-compose.ci.yml up -d
+python scripts/seed_minio.py
+pytest tests/integration/test_s3_retrieve.py -v
+docker-compose -f docker-compose.ci.yml down -v
+
+# Run single test
+pytest tests/test_endpoints.py::TestPublishEndpoint::test_publish_valid_market_data -v
+```
+
+### Local Development
+
+```bash
+# Start MCP server in dev mode (no auth)
+cd /home/user/888.MCP/mcp
+export MCP_DEV=true
+export REDIS_URL=redis://localhost:6379
+docker run -d -p 6379:6379 redis:7-alpine
+python server.py
+
+# Or with Docker Compose
+docker-compose up -d
+docker-compose logs -f mcp-server
+
+# Test endpoints
+curl http://localhost:8080/health
+curl http://localhost:8080/.well-known/mcp
+curl http://localhost:8080/tool/get_status
+```
+
+### Git Workflow
+
+```bash
+# Current branch (auto-generated by Claude Code)
+git status
+# Branch format: claude/mcp-trading-server-design-<session-id>
+
+# Commit and push
+git add .
+git commit -m "Description of changes"
+git push -u origin <branch-name>
+```
+
+### S3 Historical Data Storage Layout
+
+**Partitioned Hive-style layout** (auto-generated by uploader):
+```
+s3://{bucket}/mcp/{collection}/year=YYYY/month=MM/day=DD/hour=HH/minute=MM/part-{uuid}.{ext}
+
+Example:
+s3://my-bucket/mcp/market:data/year=2024/month=03/day=15/hour=10/minute=30/part-a1b2c3d4.jsonl.gz
+```
+
+**Key Points:**
+- Uploader batches messages every 60 seconds (configurable via `FLUSH_INTERVAL_SECONDS`)
+- Supports JSONL.gz (default) or Parquet (`UPLOAD_FORMAT=parquet`)
+- Falls back to local `DATA_DIR` if S3 unavailable
+- Retrieval endpoint supports cursor-based pagination (max 1000 messages per request)
+
+---
+
+# 📌 10. PROMPTS FOR CLAUDE CODE TO USE INTERNALLY
 
 ### When processing sentiment (Feeder):
 
@@ -254,7 +367,95 @@ Return JSON:
 
 ---
 
-# 📌 10. FINAL INSTRUCTIONS TO CLAUDE
+# 📌 11. MCP SERVER INFRASTRUCTURE COMPONENTS
+
+### Background Uploader/Archiver
+
+The `uploader/archiver.py` module runs as a background thread within the MCP server:
+
+- **Purpose**: Automatically batch and archive published messages to S3 or local storage
+- **Trigger**: Enqueues messages on every `/tool/publish` call for `market:data`, `sentiment:data`, `agent:signal`
+- **Flush strategy**:
+  - Time-based: Every 60 seconds (default)
+  - Size-based: When batch reaches 100 messages (default)
+- **Storage formats**: JSONL.gz (default) or Parquet
+- **Partitioning**: Hive-style by year/month/day/hour/minute
+- **Metrics**: Exposed via `/tool/get_status` endpoint (queue_depth, uploads_total, uploads_failed, messages_archived)
+- **Failure handling**: Falls back to local `DATA_DIR` if S3 unavailable; never deletes data
+
+### Historical Data Retrieval
+
+The `retrieval.py` module provides `/tool/retrieve` endpoint:
+
+- **Input**: collection name, optional filters (pair, timestamp range, limit, cursor)
+- **Storage support**: Reads both JSONL.gz and Parquet files from S3
+- **Pagination**: Cursor-based (base64-encoded JSON with S3 continuation key)
+- **Limits**: Max 1000 messages per request (hard cap)
+- **Partitioning**: Leverages Hive-style partitions for efficient range queries
+- **Fallback**: Returns 501 if `S3_DATA_BUCKET` not configured
+
+### Parquet Support
+
+The `tooling/s3_parquet.py` module provides:
+
+- **Primary**: PyArrow-based Parquet reading with streaming
+- **Fallback**: JSONL.gz reader if PyArrow unavailable or file is JSONL
+- **Safety**: Enforces limit caps to prevent memory exhaustion
+- **Flexibility**: Auto-detects file format from extension (.parquet, .jsonl.gz, .jsonl)
+
+### RAG Endpoint (Placeholder)
+
+The `/tool/search_rag` endpoint requires vector DB configuration:
+
+- **Config**: `VECTOR_DB_TYPE` (weaviate/faiss/pinecone), `VECTOR_DB_URL`, `VECTOR_DB_API_KEY`
+- **Current state**: Returns 501 with clear error message unless configured
+- **Future**: Adapter implementations in `server.py::_search_vector_db()` (marked with TODO)
+- **Design**: Config-driven behavior allows swapping vector DB backends
+
+### CI/CD Testing with MinIO
+
+For local S3 testing without AWS costs, use MinIO (S3-compatible storage):
+
+**Start CI environment:**
+```bash
+docker-compose -f docker-compose.ci.yml up -d
+# Services: redis, minio (ports 9000/9001), mcp-server
+```
+
+**Seed test data:**
+```bash
+python scripts/seed_minio.py
+# Creates partitioned test data in mcp-test-bucket:
+#   - 50 market:data messages (BTC-ETH)
+#   - 20 sentiment:data messages
+```
+
+**Run S3 integration tests:**
+```bash
+pytest tests/integration/test_s3_retrieve.py -v
+# Tests: retrieval, filtering, pagination, cursor continuation
+```
+
+**MinIO console access:**
+- URL: http://localhost:9001
+- Login: minioadmin / minioadmin
+- Browse buckets, inspect partitioned files
+
+**Environment override for MinIO:**
+```bash
+export AWS_ENDPOINT_URL=http://localhost:9000
+export S3_DATA_BUCKET=mcp-test-bucket
+export AWS_ACCESS_KEY_ID=minioadmin
+export AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+**GitHub Actions CI:**
+- `.github/workflows/ci.yml` - Main CI (lint, unit tests, Docker build)
+- `.github/workflows/ci-s3.yml` - S3 integration tests with MinIO
+
+---
+
+# 📌 12. FINAL INSTRUCTIONS TO CLAUDE
 
 Claude MUST always:
 
