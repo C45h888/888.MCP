@@ -53,9 +53,9 @@ services:
         value: ""
       - key: VECTOR_DB_URL
         value: ""
-    # Optional: override start command (Render will run Docker CMD by default).
-    # If you want explicit control uncomment and adjust:
-    # startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    # Service role for entrypoint.sh (web = FastAPI server)
+      - key: SERVICE_ROLE
+        value: "web"
 
   # Archiver (Background Worker)
   - type: worker
@@ -65,9 +65,10 @@ services:
     dockerContext: ./mcp
     region: oregon
     plan: standard
-    # Start command should run the archiver runner module in the image.
-    startCommand: python -u -m mcp.uploader.archiver_runner
+    # Service role for entrypoint.sh (worker = archiver background job)
     envVars:
+      - key: SERVICE_ROLE
+        value: "worker"
       - key: MCP_API_KEY
         sync: false
       - key: REDIS_URL
