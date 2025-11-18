@@ -1,79 +1,44 @@
-# Render Blueprint for MCP Server
-# https://render.com/docs/blueprint-spec
-
 services:
-  # Main MCP Server (Web Service)
   - type: web
-    name: mcp-server
+    name: core-mcp-web
     env: docker
-    region: oregon
     plan: starter
-    dockerfilePath: ./mcp/Dockerfile
-    dockerContext: ./mcp
-    healthCheckPath: /health
-    
+    region: oregon
+    buildCommand: docker build -t registry:deploy .
+    startCommand: docker run -e PORT=8080 -p 8080:8080 registry:deploy uvicorn server:app --host 0.0.0.0 --port 8080
+    healthCheckPath: "/tool/get_status"
     envVars:
-      # Redis connection (use Render Redis or external managed Redis)
       - key: REDIS_URL
-        sync: false  # Set in Render dashboard
-      
-      # Authentication (REQUIRED for production)
+        fromDatabase: REDIS_URL # optional mapping if you provision Render Redis
       - key: MCP_API_KEY
-        generateValue: true  # Auto-generate secure key
-      
-      # S3 configuration for historical data retrieval
+        sync: false
       - key: S3_DATA_BUCKET
-        sync: false  # Set to your S3 bucket name
-      
+        sync: false
+      - key: S3_KILL_BUCKET
+        sync: false
       - key: AWS_ACCESS_KEY_ID
-        sync: false  # IAM credentials with s3:GetObject, s3:ListBucket
-      
+        sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
-      
-      - key: AWS_REGION
-        value: us-east-1
-      
-      # Archiver settings
-      - key: ARCHIVE_FLUSH_INTERVAL
-        value: "60"  # seconds
-      
-      - key: ARCHIVE_BATCH_SIZE
-        value: "1000"
-      
-      - key: ARCHIVE_FORMAT
-        value: jsonl  # or parquet
-      
-      # Metrics (optional)
-      - key: ENABLE_METRICS
-        value: "false"  # Set to true if using Prometheus
-      
-      - key: METRICS_PORT
-        value: "9090"
-      
-      # Vector DB (optional - for RAG)
-      - key: VECTOR_DB_TYPE
-        value: ""  # weaviate, pinecone, faiss (leave empty to disable)
-      
-      - key: VECTOR_DB_URL
+      - key: ARCHIVE_ENABLED
+        value: "true"
+  - type: worker
+    name: core-mcp-archiver
+    env: docker
+    plan: starter
+    region: oregon
+    buildCommand: docker build -t registry:deploy .
+    startCommand: docker run registry:deploy python -u -m mcp.uploader.archiver_runner
+    envVars:
+      - key: REDIS_URL
         sync: false
-      
-      - key: VECTOR_DB_API_KEY
+      - key: MCP_API_KEY
         sync: false
-
-# Optional: Background Worker for archiver (recommended for high throughput)
-# Uncomment if you need dedicated archiver process
-#  - type: worker
-#    name: mcp-archiver
-#    env: docker
-#    region: oregon
-#    plan: starter
-#    dockerfilePath: ./mcp/Dockerfile
-#    dockerContext: ./mcp
-#    envVars:
-#      # Same env vars as web service above
-#      - key: REDIS_URL
-#        fromService:
-#          type: web
-#          name: mcp-server
-#          envVarKey: REDIS_URL
+      - key: S3_DATA_BUCKET
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: ARCHIVE_DIR
+        value: "/tmp/mcp_archive"
