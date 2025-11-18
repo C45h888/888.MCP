@@ -1,44 +1,97 @@
+# render.yaml (updated)
 services:
+  # MCP Server (Web Service)
   - type: web
-    name: core-mcp-web
+    name: mcp-server
     env: docker
-    plan: starter
+    # If your Dockerfile lives inside the `mcp/` directory (common), point both paths to it.
+    dockerfilePath: ./mcp/Dockerfile
+    dockerContext: ./mcp
     region: oregon
-    buildCommand: docker build -t registry:deploy .
-    startCommand: docker run -e PORT=8080 -p 8080:8080 registry:deploy uvicorn server:app --host 0.0.0.0 --port 8080
-    healthCheckPath: "/tool/get_status"
+    # Use Standard (2 GB) for reliable pyarrow/pandas usage; change later if needed.
+    plan: standard
+    healthCheckPath: /tool/get_status
     envVars:
-      - key: REDIS_URL
-        fromDatabase: REDIS_URL # optional mapping if you provision Render Redis
       - key: MCP_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: mcp-redis
+          type: redis
+          property: connectionString
+      - key: PORT
+        value: "8080"
+      - key: MCP_DEV
+        value: "false"
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: S3_DATA_BUCKET
         sync: false
       - key: S3_KILL_BUCKET
         sync: false
+      - key: AWS_REGION
+        value: "us-east-1"
+      - key: METRICS_PORT
+        value: "9090"
+      - key: ARCHIVE_ENABLED
+        value: "true"
+      - key: ARCHIVE_FORMAT
+        value: "jsonl"   # default; can be switched to 'parquet' when writer ready
+      - key: ARCHIVE_DIR
+        value: "/tmp/mcp_archive"
+      - key: ARCHIVE_FLUSH_INTERVAL
+        value: "60"
+      - key: ARCHIVE_BATCH_SIZE
+        value: "1000"
+      - key: PUBLISH_RATE_LIMIT
+        value: "60/minute"
+      - key: MAX_BODY_BYTES
+        value: "1048576"
+      - key: VECTOR_DB_TYPE
+        value: ""
+      - key: VECTOR_DB_URL
+        value: ""
+    # Optional: override start command (Render will run Docker CMD by default).
+    # If you want explicit control uncomment and adjust:
+    # startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+
+  # Archiver (Background Worker)
+  - type: worker
+    name: mcp-archiver
+    env: docker
+    dockerfilePath: ./mcp/Dockerfile
+    dockerContext: ./mcp
+    region: oregon
+    plan: standard
+    # Start command should run the archiver runner module in the image.
+    startCommand: python -u -m mcp.uploader.archiver_runner
+    envVars:
+      - key: MCP_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: mcp-redis
+          type: redis
+          property: connectionString
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
-        sync: false
-      - key: ARCHIVE_ENABLED
-        value: "true"
-  - type: worker
-    name: core-mcp-archiver
-    env: docker
-    plan: starter
-    region: oregon
-    buildCommand: docker build -t registry:deploy .
-    startCommand: docker run registry:deploy python -u -m mcp.uploader.archiver_runner
-    envVars:
-      - key: REDIS_URL
-        sync: false
-      - key: MCP_API_KEY
         sync: false
       - key: S3_DATA_BUCKET
         sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
+      - key: S3_KILL_BUCKET
         sync: false
       - key: ARCHIVE_DIR
         value: "/tmp/mcp_archive"
+      - key: ARCHIVE_ENABLED
+        value: "true"
+
+  # Redis (Private Service)
+  - type: redis
+    name: mcp-redis
+    region: oregon
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []  # keep empty for private network within region
