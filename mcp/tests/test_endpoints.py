@@ -16,21 +16,16 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 from unittest.mock import Mock, patch
 
-# Import app components
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # Set dev mode for tests (bypass auth by default)
 os.environ["MCP_DEV"] = "true"
 
-# Reload app to pick up env vars
+# Import app components using mcp package
 import importlib
-import server as server_module
+from mcp import server as server_module
 importlib.reload(server_module)
 app = server_module.app
 
-from redis_client import RedisClient
+from mcp.redis_client import RedisClient
 
 # Test client
 client = TestClient(app)

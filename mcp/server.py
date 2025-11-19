@@ -21,8 +21,8 @@ from pydantic import BaseModel, ValidationError
 import jsonschema
 from jsonschema import validate, ValidationError as JSONSchemaValidationError
 
-from redis_client import RedisClient
-from retrieval import retrieve_historical_data, is_retrieval_enabled, MAX_RETRIEVE_LIMIT
+from .redis_client import RedisClient
+from .retrieval import retrieve_historical_data, is_retrieval_enabled, MAX_RETRIEVE_LIMIT
 
 # Configure logging
 logging.basicConfig(
@@ -450,8 +450,10 @@ async def global_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
+    # Note: When running as a package, use "mcp.server:app"
+    # This __main__ block is for local development only
     uvicorn.run(
-        "server:app",
+        "mcp.server:app",
         host="0.0.0.0",
         port=8080,
         reload=True,

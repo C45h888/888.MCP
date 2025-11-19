@@ -21,12 +21,9 @@ import logging
 import signal
 import sys
 import time
-from pathlib import Path
 
-# Add parent directory to path so we can import from mcp package
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from mcp.uploader.archiver import Archiver
+# Import archiver using relative import (within mcp package)
+from .archiver import Archiver
 
 # Configure logging
 logging.basicConfig(
