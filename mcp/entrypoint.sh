@@ -12,13 +12,16 @@
 
 set -e
 
+# Add /app to PYTHONPATH so Python can discover the mcp package
+export PYTHONPATH="${PYTHONPATH}:/app"
+
 ROLE="${SERVICE_ROLE:-web}"
 PORT="${PORT:-8080}"
 
 case "$ROLE" in
   web)
     echo "[entrypoint] Starting MCP web server on port $PORT"
-    exec uvicorn server:app --host 0.0.0.0 --port "$PORT"
+    exec uvicorn mcp.server:app --host 0.0.0.0 --port "$PORT"
     ;;
   worker)
     echo "[entrypoint] Starting MCP archiver worker"

@@ -9,18 +9,17 @@ RUN apt-get update && \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
+# Copy requirements first (for Docker layer caching)
+COPY requirements.txt /tmp/requirements.txt
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Copy application code
-COPY . .
+# Copy application code to mcp/ subdirectory to preserve package structure
+COPY . mcp/
 
-# Copy and set up entrypoint script for multi-role support
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+# Copy entrypoint script to /app root for ENTRYPOINT command
+RUN cp mcp/entrypoint.sh /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Expose port
 EXPOSE 8080
