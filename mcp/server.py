@@ -397,18 +397,23 @@ async def search_rag(
     )
 
 
-@app.get("/health")
+@app.get("/health", include_in_schema=False)
 async def health():
     """
-    Simple health check endpoint.
+    Minimal unauthenticated health check for platform probes.
+
+    Used by Render.com and other platforms for liveness checks.
+    Does NOT expose secrets, internal metrics, or require authentication.
+    For detailed status, use /tool/get_status (requires auth).
 
     Returns:
-        Dict with health status
+        Dict with minimal health info: status, time (UTC ISO), archiver_enabled
     """
-    redis_ok = redis_client.health_check()
+    archive_enabled = os.getenv("ARCHIVE_ENABLED", "false").lower() == "true"
     return {
-        "status": "healthy" if redis_ok else "unhealthy",
-        "redis": redis_ok
+        "status": "ok",
+        "time": datetime.utcnow().isoformat() + "Z",
+        "archiver_enabled": str(archive_enabled).lower()
     }
 
 

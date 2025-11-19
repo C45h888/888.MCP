@@ -10,7 +10,7 @@ services:
     region: oregon
     # Use Standard (2 GB) for reliable pyarrow/pandas usage; change later if needed.
     plan: standard
-    healthCheckPath: /tool/get_status
+    healthCheckPath: /health
     envVars:
       - key: MCP_API_KEY
         sync: false
