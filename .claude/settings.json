@@ -1,0 +1,112 @@
+{
+  "project": {
+    "name": "888.MCP Server",
+    "description": "Redis-based pub/sub message bus for agentic trading. Enforces strict schema validation and handles message routing between Feeder and Brain agents.",
+    "language": "python"
+  },
+  "preferences": {
+    "model": "claude-sonnet-4-5-20250929",
+    "auto_approve_safe_commands": true,
+    "includeCoAuthoredBy": true
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read",
+      "Edit(./mcp/**)",
+      "Edit(./brain/**)",
+      "Edit(./offline_trainer/**)",
+      "Edit(./scripts/**)",
+      "Edit(./.github/**)",
+      "Write(./mcp/**)",
+      "Write(./brain/**)",
+      "Write(./offline_trainer/**)",
+      "Write(./scripts/**)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git branch*)",
+      "Bash(pytest*)",
+      "Bash(python -m pytest*)",
+      "Bash(flake8*)",
+      "Bash(black*)",
+      "Bash(docker*)",
+      "Bash(docker-compose*)",
+      "Bash(curl http://localhost:*)",
+      "Bash(./mcp/scripts/*.sh)",
+      "Bash(python ./mcp/server.py)",
+      "Bash(python ./scripts/*.py)",
+      "Bash(export *)",
+      "Bash(pip install*)",
+      "Bash(pip freeze*)",
+      "Glob",
+      "Grep",
+      "WebFetch"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(git reset*)",
+      "Bash(git rebase*)",
+      "Bash(docker system prune*)",
+      "Edit(./mcp/schemas/**)",
+      "Edit(./CLAUDE.md)",
+      "Edit(./README.md)",
+      "Edit(./requirements.txt)",
+      "Edit(./Dockerfile)",
+      "Edit(./docker-compose*.yml)",
+      "Edit(./render.yaml)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(rm -rf /)",
+      "Edit(./.env*)",
+      "Read(./.env*)",
+      "Edit(./.git/**)"
+    ]
+  },
+  "env": {
+    "MCP_DEV": "true",
+    "REDIS_URL": "redis://localhost:6379",
+    "PYTHONPATH": "./mcp"
+  },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        ".",
+        "./mcp",
+        "./mcp/schemas",
+        "./brain",
+        "./offline_trainer",
+        "./scripts"
+      ]
+    }
+  },
+  "commands": {
+    "test": "pytest mcp/tests/ -v",
+    "test:unit": "pytest mcp/tests/test_endpoints.py mcp/tests/test_uploader.py -v",
+    "test:integration": "pytest mcp/tests/integration/ -v",
+    "test:single": "pytest mcp/tests/test_endpoints.py::TestPublishEndpoint::test_publish_valid_market_data -v",
+    "lint": "flake8 mcp/ --exclude=mcp/__pycache__,mcp/tests/__pycache__",
+    "format": "black mcp/ brain/ offline_trainer/ scripts/",
+    "format:check": "black mcp/ brain/ offline_trainer/ scripts/ --check",
+    "smoke": "./mcp/scripts/run_smoke_tests.sh",
+    "validate": "./mcp/scripts/verify_module_fix.sh",
+    "server:dev": "cd mcp && MCP_DEV=true REDIS_URL=redis://localhost:6379 python server.py",
+    "redis:start": "docker run -d -p 6379:6379 --name mcp-redis redis:7-alpine",
+    "redis:stop": "docker stop mcp-redis && docker rm mcp-redis",
+    "up": "docker-compose -f mcp/docker-compose.yml up -d --build",
+    "up:ci": "docker-compose -f mcp/docker-compose.ci.yml up -d",
+    "down": "docker-compose -f mcp/docker-compose.yml down",
+    "down:ci": "docker-compose -f mcp/docker-compose.ci.yml down -v",
+    "logs": "docker-compose -f mcp/docker-compose.yml logs -f mcp-server",
+    "health": "curl http://localhost:8080/health",
+    "status": "curl http://localhost:8080/tool/get_status",
+    "seed:minio": "python scripts/seed_minio.py"
+  }
+}

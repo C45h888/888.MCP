@@ -1,1 +1,6 @@
 smoke_test.local.config
+
+# Claude Code local settings (model overrides)
+.claude/settings.local.json
+.claude/settings.local.json.disabled
+.claude/settings.*.json
