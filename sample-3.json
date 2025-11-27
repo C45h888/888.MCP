@@ -1,0 +1,14 @@
+{
+  "status": "healthy",
+  "redis_connected": true,
+  "kill_switch": {
+    "active": false
+  },
+  "channels": {
+    "sentiment:data": 0,
+    "agent:signal": 0,
+    "market:data": 0,
+    "agent:control": 0
+  },
+  "timestamp": 1764160674
+}
