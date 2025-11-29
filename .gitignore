@@ -4,5 +4,9 @@ smoke_test.local.config
 .claude/settings.local.json
 .claude/settings.local.json.disabled
 .claude/settings.*.json
+
+# Environment files (never commit secrets!)
 .env
+.env.local
+.env.*.local
 
