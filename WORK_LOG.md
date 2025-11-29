@@ -162,19 +162,72 @@ Phase Status:
 ## 🔄 IN PROGRESS
 
 ### **Phase 1: Post-Smoke Hardening & Archiver Stability**
-**Started:** 2025-11-26 (planned)
-**Status:** ⏳ NOT STARTED
+**Started:** 2025-11-28
+**Status:** ⏳ IN PROGRESS (15% complete)
 **Priority:** P0-CRITICAL (Data Integrity)
 
 **Current Focus:** Phase 1.1 - Archiver Stability & S3 Behaviour
 
+**Completed Tasks:**
+- [x] AWS CLI Installation & Configuration (2025-11-28)
+  - Downloaded AWS CLI v2 installer to /tmp/AWSCLIV2.pkg
+  - User completed manual installation (requires sudo)
+  - Configured ~/.aws/credentials with production profile
+  - Configured ~/.aws/config with eu-north-1 region
+  - Created S3 inspection helper script (scripts/inspect_s3.sh)
+
+- [x] IAM Policy Troubleshooting (2025-11-28)
+  - Identified bucket name mismatch in IAM policy
+  - IAM policy had: `mcp-data-prod-kamii` (wrong)
+  - Actual bucket: `mcp-data-prod-kamesh.888` (correct)
+  - User updated IAM policy with correct bucket ARN
+  - Verified all S3 operations: ListBucket ✅, PutObject ✅, GetObject ✅, DeleteObject ✅
+
+- [x] 1.1.1 (Day 1): Run smoke tests - FIRST EXECUTION (2025-11-28)
+  - Result: 14/14 tests PASSED ✅
+  - All connectivity, auth, publish, kill-switch tests green
+  - **🔴 CRITICAL FINDING: Archiver not writing to S3**
+    - Archiver currently a STUB (logs only, no S3 writes)
+    - Retrieval endpoint returns 501 (S3 not configured)
+    - Root cause: Missing S3 env vars on Render deployment
+
+**Tasks In Progress:**
+- [ ] 1.1.1: Configure S3 environment variables on Render
+- [ ] 1.1.1: Verify archiver starts writing to S3 after config
+- [ ] 1.1.1: Re-run Day 1 smoke tests with S3 active
+
 **Tasks Pending:**
-- [ ] 1.1.1: Run smoke tests 3-5 times over different days
+- [ ] 1.1.1: Run smoke tests on Day 2 (after S3 config)
+- [ ] 1.1.1: Run smoke tests on Day 3-5
 - [ ] 1.1.2: Inspect S3 object layout in production
 - [ ] 1.1.3: Verify partition structure matches specification
 - [ ] 1.1.4: Check for duplicate or overlapping time ranges
 - [ ] 1.1.5: Verify no gaps in regular traffic patterns
 - [ ] 1.1.6: Simulate S3 failure and verify local fallback
+
+**Critical Finding - S3 Configuration Missing:**
+
+The MCP server deployment on Render is missing S3 environment variables, preventing data archival:
+
+**Missing Environment Variables:**
+```
+S3_DATA_BUCKET = mcp-data-prod-kamesh.888
+AWS_DEFAULT_REGION = eu-north-1
+```
+
+**Bucket Details:**
+- Name: `mcp-data-prod-kamesh.888`
+- Region: `eu-north-1`
+- AWS Account: 420747712310
+- IAM User: arn:aws:iam::420747712310:user/888-mcp-user
+- Permissions: Verified working (ListBucket, PutObject, GetObject, DeleteObject)
+
+**Next Action Required:**
+1. Add S3 environment variables to Render dashboard (mcp-server service)
+2. Redeploy service to activate S3 archival
+3. Re-run Phase 1.1.1 Day 1 smoke tests
+4. Verify archiver writes to S3
+5. Continue with multi-day testing (Days 2-5)
 
 ---
 
