@@ -211,8 +211,6 @@ The MCP server deployment on Render is missing S3 environment variables, prevent
 
 **Missing Environment Variables:**
 ```
-S3_DATA_BUCKET = mcp-data-prod-kamesh.888
-AWS_DEFAULT_REGION = eu-north-1
 ```
 
 **Bucket Details:**
