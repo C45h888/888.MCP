@@ -10,3 +10,9 @@ smoke_test.local.config
 .env.local
 .env.*.local
 
+# Test scripts with hardcoded keys (local only)
+run_phase_*.sh
+run_priority*.sh
+test_a*.sh
+smoke_test.config
+
