@@ -39,7 +39,8 @@ class Archiver:
         # Configuration
         self.enabled = os.getenv("ARCHIVE_ENABLED", "true").lower() == "true"
         self.bucket_name = os.getenv("S3_DATA_BUCKET")
-        self.region = os.getenv("AWS_DEFAULT_REGION", "eu-north-1")
+        # Check both AWS_DEFAULT_REGION and AWS_REGION (AWS SDK uses AWS_DEFAULT_REGION, but AWS_REGION is common)
+        self.region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION", "eu-north-1")
         self.batch_size = int(os.getenv("ARCHIVE_BATCH_SIZE", "100"))
         self.flush_interval = int(os.getenv("ARCHIVE_FLUSH_INTERVAL", "60"))
 
