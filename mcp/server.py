@@ -23,6 +23,7 @@ from jsonschema import validate, ValidationError as JSONSchemaValidationError
 
 from .redis_client import RedisClient
 from .retrieval import retrieve_historical_data, is_retrieval_enabled, MAX_RETRIEVE_LIMIT
+from .uploader.archiver import Archiver
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +46,9 @@ MCP_API_KEY = os.getenv("MCP_API_KEY", "")
 # Initialize Redis client
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = RedisClient(REDIS_URL)
+
+# Initialize Archiver for S3 uploads
+archiver = Archiver()
 
 # Load JSON schemas
 SCHEMA_DIR = Path(__file__).parent / "schemas" / "v1"
@@ -229,6 +233,12 @@ async def publish_message(request: PublishRequest):
     # Publish to Redis
     try:
         subscriber_count = redis_client.publish(channel, message)
+
+        # Enqueue for S3 archiving (fire-and-forget)
+        # Only archive data channels, not control messages
+        if channel in ["market:data", "sentiment:data", "agent:signal"]:
+            archiver.enqueue(channel, message)
+
     except Exception as e:
         logger.error(f"Failed to publish message: {e}")
         raise HTTPException(
@@ -425,6 +435,11 @@ async def startup_event():
     logger.info("MCP Server starting...")
     logger.info(f"Connected to Redis at {REDIS_URL}")
     logger.info(f"Loaded {len(SCHEMAS)} channel schemas")
+
+    # Start archiver background worker
+    archiver.start()
+    logger.info(f"Archiver started (enabled={archiver.enabled}, bucket={archiver.bucket_name})")
+
     logger.info("MCP Server ready")
 
 
@@ -432,6 +447,11 @@ async def startup_event():
 async def shutdown_event():
     """Run on server shutdown."""
     logger.info("MCP Server shutting down...")
+
+    # Stop archiver and flush remaining messages
+    archiver.stop()
+    logger.info("Archiver stopped")
+
     redis_client.close()
     logger.info("MCP Server stopped")
 
