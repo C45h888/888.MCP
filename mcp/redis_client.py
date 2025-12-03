@@ -33,6 +33,8 @@ class RedisClient:
     }
 
     KILL_SWITCH_KEY = "mcp:kill_switch"
+    KILL_HISTORY_KEY = "mcp:kill_history"
+    MAX_HISTORY_SIZE = 100  # Keep last 100 control events
 
     def __init__(self, redis_url: str = "redis://localhost:6379"):
         """
@@ -107,17 +109,36 @@ class RedisClient:
         Handle agent:control messages with kill-switch persistence.
 
         If command is EMERGENCY_HALT, persist to Redis key.
+        All control messages are appended to kill history.
 
         Args:
             message: Control message payload
         """
         command = message.get("command")
+        timestamp = message.get("timestamp", int(datetime.now().timestamp()))
+
+        # Append to kill history (all control events)
+        history_entry = {
+            "command": command,
+            "timestamp": timestamp,
+            "reason": message.get("reason", ""),
+            "recorded_at": int(datetime.now().timestamp())
+        }
+
+        # Add to history list (newest first)
+        self.client.lpush(
+            self.KILL_HISTORY_KEY,
+            json.dumps(history_entry)
+        )
+
+        # Trim to keep only MAX_HISTORY_SIZE entries
+        self.client.ltrim(self.KILL_HISTORY_KEY, 0, self.MAX_HISTORY_SIZE - 1)
 
         if command == "EMERGENCY_HALT":
             # Persist kill switch
             kill_switch_data = {
                 "active": True,
-                "timestamp": message.get("timestamp", int(datetime.now().timestamp())),
+                "timestamp": timestamp,
                 "reason": message.get("reason", "Unknown")
             }
             self.client.set(
@@ -144,6 +165,39 @@ class RedisClient:
             return json.loads(kill_switch_data)
 
         return {"active": False}
+
+    def get_kill_history(self, limit: int = 100) -> list[Dict[str, Any]]:
+        """
+        Get kill-switch history (ordered by most recent first).
+
+        Returns ordered list of control events (EMERGENCY_HALT, RESUME, etc.)
+        that have been published to agent:control channel.
+
+        Args:
+            limit: Maximum number of history entries to return (default 100)
+
+        Returns:
+            List of control event dicts with keys:
+                - command: str (EMERGENCY_HALT, RESUME, etc.)
+                - timestamp: int (from message)
+                - reason: str (from message)
+                - recorded_at: int (when recorded to history)
+        """
+        try:
+            # Get history from Redis list (LRANGE returns oldest to newest)
+            # Since we LPUSH (add to head), index 0 is most recent
+            history_json = self.client.lrange(
+                self.KILL_HISTORY_KEY,
+                0,
+                min(limit, self.MAX_HISTORY_SIZE) - 1
+            )
+
+            history = [json.loads(entry) for entry in history_json]
+            return history
+
+        except redis.RedisError as e:
+            logger.error(f"Failed to get kill history: {e}")
+            return []
 
     def health_check(self) -> bool:
         """

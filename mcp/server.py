@@ -150,6 +150,13 @@ class SearchRAGRequest(BaseModel):
     k: int = 5
 
 
+class KillHistoryResponse(BaseModel):
+    """Response model for kill history retrieval."""
+    events: List[Dict[str, Any]]
+    count: int
+    current_status: Dict[str, Any]
+
+
 # Endpoints
 
 @app.get("/.well-known/mcp", response_model=Dict[str, Any])
@@ -168,7 +175,8 @@ async def mcp_info():
         "endpoints": {
             "publish": "/tool/publish",
             "list_channels": "/tool/list_collections",
-            "status": "/tool/get_status"
+            "status": "/tool/get_status",
+            "kill_history": "/tool/kill_history"
         },
         "architecture": {
             "feeder_agent": "n8n - data ingestion",
@@ -292,6 +300,37 @@ async def get_status():
         kill_switch=kill_switch,
         channels=channels,
         timestamp=int(datetime.now().timestamp())
+    )
+
+
+@app.get("/tool/kill_history", response_model=KillHistoryResponse, dependencies=[Depends(verify_api_key)])
+async def get_kill_history(limit: int = Query(default=100, ge=1, le=100)):
+    """
+    Get kill-switch history (ordered list of control events).
+
+    Returns historical record of all agent:control messages (EMERGENCY_HALT, RESUME, etc.)
+    ordered by most recent first. Useful for Brain agent to understand control event timeline.
+
+    Requires authentication in production mode (x-api-key header).
+
+    Args:
+        limit: Maximum number of history entries to return (1-100, default 100)
+
+    Returns:
+        KillHistoryResponse with:
+            - events: List of control events (most recent first)
+            - count: Number of events returned
+            - current_status: Current kill-switch status
+    """
+    history = redis_client.get_kill_history(limit=limit)
+    current_status = redis_client.get_kill_switch_status()
+
+    logger.info(f"Kill history retrieved: {len(history)} events")
+
+    return KillHistoryResponse(
+        events=history,
+        count=len(history),
+        current_status=current_status
     )
 
 

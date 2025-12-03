@@ -446,6 +446,111 @@ class TestRAGEndpoint:
         assert "not yet implemented" in response.json()["detail"].lower()
 
 
+class TestKillHistory:
+    """Test /tool/kill_history endpoint."""
+
+    @patch('server.redis_client.get_kill_history')
+    @patch('server.redis_client.get_kill_switch_status')
+    def test_get_kill_history_empty(self, mock_status, mock_history):
+        """Test kill history endpoint when no events exist."""
+        mock_history.return_value = []
+        mock_status.return_value = {"active": False}
+
+        response = client.get("/tool/kill_history")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["count"] == 0
+        assert data["events"] == []
+        assert data["current_status"]["active"] is False
+
+    @patch('server.redis_client.get_kill_history')
+    @patch('server.redis_client.get_kill_switch_status')
+    def test_get_kill_history_with_events(self, mock_status, mock_history):
+        """Test kill history endpoint returns ordered events."""
+        mock_history.return_value = [
+            {
+                "command": "RESUME",
+                "timestamp": 1678886420,
+                "reason": "TEST_COMPLETE",
+                "recorded_at": 1678886420
+            },
+            {
+                "command": "EMERGENCY_HALT",
+                "timestamp": 1678886410,
+                "reason": "TEST_ACTIVATION",
+                "recorded_at": 1678886410
+            }
+        ]
+        mock_status.return_value = {"active": False}
+
+        response = client.get("/tool/kill_history")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["count"] == 2
+        assert len(data["events"]) == 2
+        # Most recent first
+        assert data["events"][0]["command"] == "RESUME"
+        assert data["events"][1]["command"] == "EMERGENCY_HALT"
+
+    @patch('server.redis_client.get_kill_history')
+    @patch('server.redis_client.get_kill_switch_status')
+    def test_get_kill_history_respects_limit(self, mock_status, mock_history):
+        """Test kill history endpoint respects limit parameter."""
+        mock_history.return_value = [
+            {"command": "RESUME", "timestamp": 1678886410, "reason": "", "recorded_at": 1678886410}
+        ] * 10
+        mock_status.return_value = {"active": False}
+
+        response = client.get("/tool/kill_history?limit=5")
+        assert response.status_code == 200
+
+        # Verify limit was passed to redis_client
+        mock_history.assert_called_once_with(limit=5)
+
+    @patch('server.redis_client.get_kill_history')
+    @patch('server.redis_client.get_kill_switch_status')
+    def test_get_kill_history_with_active_kill_switch(self, mock_status, mock_history):
+        """Test kill history shows current active kill switch."""
+        mock_history.return_value = [
+            {
+                "command": "EMERGENCY_HALT",
+                "timestamp": 1678886410,
+                "reason": "USDT_DEPEG_DETECTED",
+                "recorded_at": 1678886410
+            }
+        ]
+        mock_status.return_value = {
+            "active": True,
+            "timestamp": 1678886410,
+            "reason": "USDT_DEPEG_DETECTED"
+        }
+
+        response = client.get("/tool/kill_history")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["count"] == 1
+        assert data["current_status"]["active"] is True
+        assert data["current_status"]["reason"] == "USDT_DEPEG_DETECTED"
+        assert data["events"][0]["command"] == "EMERGENCY_HALT"
+
+    def test_get_kill_history_limit_validation(self):
+        """Test kill history endpoint validates limit parameter."""
+        # Test limit too high
+        response = client.get("/tool/kill_history?limit=101")
+        assert response.status_code == 422  # Validation error
+
+        # Test limit too low
+        response = client.get("/tool/kill_history?limit=0")
+        assert response.status_code == 422
+
+        # Test negative limit
+        response = client.get("/tool/kill_history?limit=-1")
+        assert response.status_code == 422
+
+
 # Run tests
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
