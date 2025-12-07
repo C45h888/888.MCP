@@ -1,0 +1,12 @@
+{
+  "collection": "market:data",
+  "target_count": 500,
+  "target_rate": 10,
+  "success_count": 500,
+  "failed_count": 0,
+  "success_rate": 1.0000,
+  "duration_seconds": 248,
+  "actual_rate": 2.01,
+  "start_time": 1764994635,
+  "end_time": 1764994883
+}

@@ -34,6 +34,13 @@ services:
     container_name: mcp-server
     environment:
       - REDIS_URL=redis://redis:6379
+      - ARCHIVE_ENABLED=true
+      - ARCHIVE_BATCH_SIZE=200
+      - ARCHIVE_FLUSH_INTERVAL=60
+      - S3_DATA_BUCKET=${S3_DATA_BUCKET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-north-1}
     ports:
       - "8080:8080"
     depends_on:

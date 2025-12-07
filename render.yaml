@@ -44,7 +44,7 @@ services:
       - key: ARCHIVE_FLUSH_INTERVAL
         value: "60"
       - key: ARCHIVE_BATCH_SIZE
-        value: "1000"
+        value: "200"
       - key: PUBLISH_RATE_LIMIT
         value: "60/minute"
       - key: MAX_BODY_BYTES
