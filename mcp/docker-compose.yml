@@ -41,6 +41,16 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-north-1}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Phase 4: Rate Limiting Configuration
+      - RATE_LIMIT_GLOBAL_IP=${RATE_LIMIT_GLOBAL_IP:-100/minute}
+      - RATE_LIMIT_GLOBAL_KEY=${RATE_LIMIT_GLOBAL_KEY:-200/minute}
+      - RATE_LIMIT_PUBLISH=${RATE_LIMIT_PUBLISH:-60/minute}
+      - RATE_LIMIT_RETRIEVE=${RATE_LIMIT_RETRIEVE:-30/minute}
+      - RATE_LIMIT_STATUS=${RATE_LIMIT_STATUS:-120/minute}
+      - RATE_LIMIT_METRICS=${RATE_LIMIT_METRICS:-120/minute}
+      - RATE_LIMIT_ADMIN=${RATE_LIMIT_ADMIN:-30/minute}
+      - RATE_LIMIT_HEALTH=${RATE_LIMIT_HEALTH:-300/minute}
     ports:
       - "8080:8080"
     depends_on:

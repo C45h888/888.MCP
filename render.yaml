@@ -53,6 +53,25 @@ services:
         value: ""
       - key: VECTOR_DB_URL
         value: ""
+      - key: LOG_LEVEL
+        value: "INFO"
+    # Phase 4: Rate Limiting Configuration
+      - key: RATE_LIMIT_GLOBAL_IP
+        value: "100/minute"
+      - key: RATE_LIMIT_GLOBAL_KEY
+        value: "200/minute"
+      - key: RATE_LIMIT_PUBLISH
+        value: "60/minute"
+      - key: RATE_LIMIT_RETRIEVE
+        value: "30/minute"
+      - key: RATE_LIMIT_STATUS
+        value: "120/minute"
+      - key: RATE_LIMIT_METRICS
+        value: "120/minute"
+      - key: RATE_LIMIT_ADMIN
+        value: "30/minute"
+      - key: RATE_LIMIT_HEALTH
+        value: "300/minute"
     # Service role for entrypoint.sh (web = FastAPI server)
       - key: SERVICE_ROLE
         value: "web"
@@ -88,6 +107,8 @@ services:
         value: "/tmp/mcp_archive"
       - key: ARCHIVE_ENABLED
         value: "true"
+      - key: LOG_LEVEL
+        value: "INFO"
 
   # Redis (Private Service)
   - type: redis
