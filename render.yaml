@@ -49,10 +49,13 @@ services:
         value: "60/minute"
       - key: MAX_BODY_BYTES
         value: "1048576"
+      # Phase 6: Vector RAG Configuration
       - key: VECTOR_DB_TYPE
-        value: ""
+        value: "mock"   # Options: mock (default), pinecone, weaviate, upstash, custom
       - key: VECTOR_DB_URL
-        value: ""
+        value: ""       # External vector DB endpoint (required for non-mock engines)
+      - key: VECTOR_DB_API_KEY
+        sync: false     # API key for vector DB authentication (optional, secret)
       - key: LOG_LEVEL
         value: "INFO"
     # Phase 4: Rate Limiting Configuration

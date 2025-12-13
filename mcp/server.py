@@ -33,6 +33,7 @@ from . import metrics
 from .logging_config import setup_logging, set_request_id, clear_request_id, log_with_context
 from .auth import APIKeyManager, has_permission
 from .rate_limiter import RateLimiter, RateLimitExceeded, RateLimitConfig
+from .vector_engine import get_vector_engine, VectorEngine
 
 # Configure structured JSON logging
 logger = setup_logging()
@@ -208,6 +209,10 @@ rate_limit_config = RateLimitConfig()
 # Initialize Archiver for S3 uploads
 archiver = Archiver()
 
+# Initialize Vector Engine (for RAG search)
+# Will be configured based on VECTOR_DB_TYPE env var (mock, pinecone, weaviate, upstash)
+vector_engine: Optional[VectorEngine] = None
+
 # Load JSON schemas
 SCHEMA_DIR = Path(__file__).parent / "schemas" / "v1"
 SCHEMAS: Dict[str, Dict[str, Any]] = {}
@@ -379,7 +384,9 @@ class RetrieveRequest(BaseModel):
 class SearchRAGRequest(BaseModel):
     """Request model for RAG search."""
     query: str
-    k: int = 5
+    limit: int = 5
+    min_score: float = 0.0
+    filters: Optional[Dict[str, Any]] = None
 
 
 class KillHistoryResponse(BaseModel):
@@ -437,6 +444,7 @@ async def mcp_info():
             "status": "/tool/get_status",
             "kill_history": "/tool/kill_history",
             "retrieve": "/tool/retrieve",
+            "search_rag": "/tool/search_rag",
             "metrics": "/metrics",
             "admin": {
                 "create_key": "/admin/keys/create",
@@ -758,33 +766,102 @@ async def retrieve(
         )
 
 
-@app.post("/tool/search_rag")
+@app.post("/tool/search_rag", dependencies=[Depends(verify_api_key)])
 async def search_rag(
     request: Request,
     search_request: SearchRAGRequest
 ):
     """
-    Search RAG knowledge base (placeholder for future vector DB integration).
+    Search RAG knowledge base using external vector database.
 
-    Currently returns 501 Not Implemented. This endpoint is reserved for
-    future integration with vector databases (Pinecone, Weaviate, etc.) for
-    semantic search over historical market data and sentiment.
+    Performs semantic search over historical market data and sentiment
+    using configured vector database (Pinecone, Weaviate, Upstash, or mock).
+
+    Configuration:
+        - VECTOR_DB_TYPE: Engine type (mock, pinecone, weaviate, upstash)
+        - VECTOR_DB_URL: Vector DB endpoint URL
+        - VECTOR_DB_API_KEY: API key for authentication
+
+    Requires authentication in production mode (x-api-key header).
 
     Args:
         request: FastAPI Request object
-        search_request: Search parameters (query, k)
+        search_request: Search parameters (query, limit, min_score, filters)
 
     Returns:
-        501 Not Implemented
-    """
-    logger.info(
-        f"RAG search attempted (not yet implemented): {search_request.query}"
-    )
+        Dict with search results and metadata
 
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="RAG search not yet implemented. Future integration planned for vector database (Pinecone/Weaviate)."
-    )
+    Raises:
+        HTTPException: 501 if vector engine not configured, 500 for errors
+    """
+    # Check if vector engine is initialized
+    if vector_engine is None:
+        logger.warning("RAG search attempted but vector engine not initialized")
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="RAG search not configured. Set VECTOR_DB_TYPE and VECTOR_DB_URL."
+        )
+
+    # Validate limit
+    MAX_RAG_LIMIT = 100
+    if search_request.limit > MAX_RAG_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Limit exceeds maximum allowed ({MAX_RAG_LIMIT})"
+        )
+
+    # Validate min_score range
+    if not (0.0 <= search_request.min_score <= 1.0):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_score must be between 0.0 and 1.0"
+        )
+
+    try:
+        # Start latency timer
+        start_time = time.time()
+
+        # Perform vector search
+        results = await vector_engine.search(
+            query=search_request.query,
+            limit=search_request.limit,
+            min_score=search_request.min_score,
+            filters=search_request.filters
+        )
+
+        # Record search latency
+        latency = time.time() - start_time
+
+        logger.info(
+            f"RAG search successful: {len(results)} results in {latency:.3f}s",
+            extra={
+                'query': search_request.query,
+                'result_count': len(results),
+                'latency': latency
+            }
+        )
+
+        return {
+            "success": True,
+            "results": results,
+            "count": len(results),
+            "query": search_request.query,
+            "filters": search_request.filters,
+            "latency_seconds": round(latency, 3)
+        }
+
+    except ValueError as e:
+        logger.error(f"RAG search validation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"RAG search failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"RAG search failed: {str(e)}"
+        )
 
 
 @app.get("/health", include_in_schema=False)
@@ -1046,6 +1123,8 @@ async def rotate_api_key(
 @app.on_event("startup")
 async def startup_event():
     """Run on server startup."""
+    global vector_engine
+
     log_with_context(logger, 'info', "MCP Server starting")
     log_with_context(logger, 'info', "Connected to Redis", redis_url=REDIS_URL)
     log_with_context(logger, 'info', "Schemas loaded", schema_count=len(SCHEMAS))
@@ -1062,6 +1141,15 @@ async def startup_event():
     environment = "development" if MCP_DEV else "production"
     metrics.set_server_info(version="1.0.0", environment=environment)
     log_with_context(logger, 'info', "Metrics initialized", environment=environment)
+
+    # Initialize vector engine for RAG search
+    try:
+        vector_engine = get_vector_engine()
+        db_type = os.getenv("VECTOR_DB_TYPE", "mock")
+        log_with_context(logger, 'info', "Vector engine initialized", db_type=db_type)
+    except Exception as e:
+        log_with_context(logger, 'warning', "Vector engine initialization failed", error=str(e))
+        vector_engine = None
 
     # Start archiver background worker
     archiver.start()
