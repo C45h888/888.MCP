@@ -111,7 +111,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
     # Remove server header (security through obscurity)
-    response.headers.pop("Server", None)
+    # MutableHeaders doesn't support .pop() - use del with existence check
+    try:
+        del response.headers["Server"]
+    except KeyError:
+        pass  # Header doesn't exist, nothing to remove
 
     return response
 

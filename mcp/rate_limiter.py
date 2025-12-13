@@ -161,7 +161,13 @@ class RateLimiter:
 
             if bucket_data:
                 # Parse existing bucket
-                parts = bucket_data.decode().split(":")
+                # Handle both bytes (decode_responses=False) and str (decode_responses=True)
+                if isinstance(bucket_data, bytes):
+                    bucket_str = bucket_data.decode('utf-8')
+                else:
+                    bucket_str = bucket_data  # Already a string
+
+                parts = bucket_str.split(":")
                 tokens = float(parts[0])
                 last_refill = float(parts[1])
             else:
