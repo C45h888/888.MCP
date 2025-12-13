@@ -329,6 +329,7 @@ class RateLimitConfig:
     - RATE_LIMIT_GLOBAL_KEY: Global per-key limit (default: "200/minute")
     - RATE_LIMIT_PUBLISH: Publish endpoint limit (default: "60/minute")
     - RATE_LIMIT_RETRIEVE: Retrieve endpoint limit (default: "30/minute")
+    - RATE_LIMIT_RAG: RAG search endpoint limit (default: "30/minute")
     - RATE_LIMIT_STATUS: Status endpoint limit (default: "120/minute")
     - RATE_LIMIT_METRICS: Metrics endpoint limit (default: "120/minute")
     - RATE_LIMIT_ADMIN: Admin endpoints limit (default: "30/minute")
@@ -342,6 +343,7 @@ class RateLimitConfig:
         self.global_key = os.getenv("RATE_LIMIT_GLOBAL_KEY", "200/minute")
         self.publish = os.getenv("RATE_LIMIT_PUBLISH", "60/minute")
         self.retrieve = os.getenv("RATE_LIMIT_RETRIEVE", "30/minute")
+        self.rag = os.getenv("RATE_LIMIT_RAG", "30/minute")  # Phase 6: RAG endpoint rate limit
         self.status = os.getenv("RATE_LIMIT_STATUS", "120/minute")
         self.metrics = os.getenv("RATE_LIMIT_METRICS", "120/minute")
         self.admin = os.getenv("RATE_LIMIT_ADMIN", "30/minute")

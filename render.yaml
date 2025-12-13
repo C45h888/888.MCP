@@ -67,6 +67,8 @@ services:
         value: "60/minute"
       - key: RATE_LIMIT_RETRIEVE
         value: "30/minute"
+      - key: RATE_LIMIT_RAG
+        value: "30/minute"   # Phase 6: RAG search endpoint (same as retrieve)
       - key: RATE_LIMIT_STATUS
         value: "120/minute"
       - key: RATE_LIMIT_METRICS

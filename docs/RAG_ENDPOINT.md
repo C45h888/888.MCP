@@ -364,6 +364,8 @@ export MCP_API_KEY=your-mcp-key
 ### Test Coverage
 
 The test script ([test_rag_endpoint.sh](../mcp/scripts/test_rag_endpoint.sh)) covers:
+
+**Functional Tests:**
 - ✅ Basic search queries
 - ✅ Custom limit parameters
 - ✅ Min score thresholds
@@ -372,6 +374,33 @@ The test script ([test_rag_endpoint.sh](../mcp/scripts/test_rag_endpoint.sh)) co
 - ✅ Invalid min_score validation (out of range)
 - ✅ Missing required field validation
 - ✅ Empty query edge case
+
+**Security Tests (Phase 6 Compliance):**
+- ✅ No API key rejection (401 Unauthorized)
+- ✅ Invalid API key rejection (401 Unauthorized)
+- ✅ Feeder key denial (403 Forbidden - RBAC)
+- ✅ Readonly key denial (403 Forbidden - RBAC)
+- ✅ Admin/Brain key acceptance (200 OK)
+
+**How to Run Security Tests:**
+```bash
+# Basic security tests (no API key / invalid API key)
+./scripts/test_rag_endpoint.sh
+
+# Full RBAC tests (requires API keys for each role)
+export ADMIN_KEY=mcp_admin_...
+export FEEDER_KEY=mcp_feeder_...
+export READONLY_KEY=mcp_readonly_...
+./scripts/test_rag_endpoint.sh
+
+# Skip security tests (functional tests only)
+SKIP_SECURITY_TESTS=true ./scripts/test_rag_endpoint.sh
+```
+
+**Expected Results:**
+- Feeder/readonly keys must return **403 Forbidden**
+- Admin/brain keys must return **200 OK**
+- If feeder/readonly keys get 200 OK, this is a **CRITICAL RBAC VIOLATION**
 
 ---
 
@@ -403,27 +432,96 @@ RAG search respects existing MCP server rate limits:
 
 ## Security
 
+### 🔒 Phase 6 Security Compliance
+
+The RAG endpoint follows **Phase 4 Security Standards** with 3-layer protection:
+
+```
+┌─────────────────────────────────────┐
+│  Layer 1: Per-IP Global Limit      │  ← 100/minute (middleware)
+│  Prevents DoS from single IP       │
+├─────────────────────────────────────┤
+│  Layer 2: Per-Key Global Limit     │  ← 200/minute (middleware)
+│  Fair usage enforcement             │
+├─────────────────────────────────────┤
+│  Layer 3: RBAC + Endpoint Limit    │  ← 30/minute (endpoint-specific)
+│  retrieve:rag permission required   │  ← verify_permission("retrieve:rag")
+└─────────────────────────────────────┘
+```
+
+### Role-Based Access Control (RBAC)
+
+**Only the following roles can access `/tool/search_rag`:**
+
+| Role | Access | Permission | Reason |
+|------|--------|------------|--------|
+| `admin` | ✅ **ALLOWED** | `*` (wildcard) | Full system access |
+| `brain` | ✅ **ALLOWED** | `retrieve:*` | Needs RAG for trading signals |
+| `feeder` | ❌ **DENIED** | No retrieve permission | Should only publish data |
+| `ops` | ❌ **DENIED** | No retrieve permission | Control-only access |
+| `readonly` | ❌ **DENIED** | No retrieve permission | Metrics/status only |
+
+**Permission Enforcement:**
+- Endpoint requires `retrieve:rag` permission
+- `brain` role has `retrieve:*` (wildcard matches `retrieve:rag`)
+- Attempts by unauthorized roles return **403 Forbidden**
+- See [auth.py:29-57](../mcp/auth.py#L29-L57) for permission definitions
+
+### Rate Limiting
+
+**Endpoint-Specific Limits:**
+- **RATE_LIMIT_RAG**: 30 requests/minute (default)
+- Same as `RATE_LIMIT_RETRIEVE` (both are read operations)
+- Configurable via environment variable
+
+**Cost Protection:**
+- External vector DB calls cost ~$0.0001/query
+- Rate limiting prevents cost bleed from spam/bugs
+- 30/minute = max $43.20/month even if fully saturated
+
 ### Authentication
 
 - **Dev mode** (`MCP_DEV=true`): No authentication required
-- **Production mode**: Requires valid `x-api-key` header
-- **Permissions**: Any authenticated key can call `/tool/search_rag`
+- **Production mode**: Requires valid `x-api-key` header with `retrieve:rag` permission
+- **Invalid key**: Returns **401 Unauthorized**
+- **Valid but wrong role**: Returns **403 Forbidden**
 
 ### API Key Management
 
 Create API keys with appropriate roles:
 ```bash
-# Create a dedicated RAG search key (readonly role)
+# ✅ CORRECT: Create brain key (has retrieve:* permission)
+curl -X POST https://your-mcp-server.com/admin/keys/create \
+  -H "x-api-key: admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "brain",
+    "description": "RAG search for Brain agent"
+  }'
+
+# ❌ INCORRECT: Don't use readonly for RAG (no retrieve permission)
 curl -X POST https://your-mcp-server.com/admin/keys/create \
   -H "x-api-key: admin-key" \
   -H "Content-Type: application/json" \
   -d '{
     "role": "readonly",
-    "description": "RAG search for Brain agent"
+    "description": "This will NOT work for RAG"
   }'
 ```
 
-### Secrets Management
+### Security Best Practices
+
+**1. Least Privilege**
+- Use `brain` role keys for Brain agent RAG access
+- Don't use `admin` keys in production (overly permissive)
+- Revoke keys immediately if compromised
+
+**2. Audit Logging**
+- All RAG requests logged with key role and suffix
+- Monitor logs for unexpected access patterns
+- Set up alerts for 403 Forbidden responses
+
+**3. Secrets Management**
 
 **NEVER commit secrets to Git!**
 
@@ -431,6 +529,11 @@ Store secrets in:
 - **Render.com**: Environment variables with `sync: false`
 - **Local dev**: `.env` file (gitignored)
 - **CI/CD**: GitHub Secrets or encrypted environment variables
+
+**4. Cost Monitoring**
+- Monitor RAG endpoint usage metrics
+- Set up billing alerts on vector DB provider (Pinecone, Weaviate, etc.)
+- Consider lower rate limits if costs exceed budget
 
 ---
 

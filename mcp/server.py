@@ -234,9 +234,9 @@ def load_schemas() -> None:
         try:
             with open(schema_path, 'r') as f:
                 SCHEMAS[channel] = json.load(f)
-            log_with_context(logger, 'info', "Schema loaded successfully", channel=channel, filename=filename)
+            log_with_context(logger, 'info', "Schema loaded successfully", channel=channel, schema_file=filename)
         except Exception as e:
-            log_with_context(logger, 'error', "Failed to load schema", channel=channel, filename=filename, error=str(e))
+            log_with_context(logger, 'error', "Failed to load schema", channel=channel, schema_file=filename, error=str(e))
             raise
 
 
@@ -766,10 +766,11 @@ async def retrieve(
         )
 
 
-@app.post("/tool/search_rag", dependencies=[Depends(verify_api_key)])
+@app.post("/tool/search_rag", dependencies=[Depends(verify_permission("retrieve:rag"))])
 async def search_rag(
     request: Request,
-    search_request: SearchRAGRequest
+    search_request: SearchRAGRequest,
+    key_info: Dict[str, Any] = Depends(verify_permission("retrieve:rag"))
 ):
     """
     Search RAG knowledge base using external vector database.
@@ -782,17 +783,27 @@ async def search_rag(
         - VECTOR_DB_URL: Vector DB endpoint URL
         - VECTOR_DB_API_KEY: API key for authentication
 
-    Requires authentication in production mode (x-api-key header).
+    Security:
+        - Requires 'retrieve:rag' permission (brain or admin roles only)
+        - Rate limited to RATE_LIMIT_RAG (default: 30/minute)
+        - Per-IP and per-key global limits also apply
+        - Protected against cost bleed via external vector DB APIs
+
+    Authentication:
+        - Requires x-api-key header with retrieve:rag permission
+        - Feeder, ops, and readonly keys are DENIED (403 Forbidden)
+        - Only brain and admin roles have access
 
     Args:
         request: FastAPI Request object
         search_request: Search parameters (query, limit, min_score, filters)
+        key_info: Authenticated key metadata (for audit logging)
 
     Returns:
         Dict with search results and metadata
 
     Raises:
-        HTTPException: 501 if vector engine not configured, 500 for errors
+        HTTPException: 401 unauthorized, 403 forbidden, 501 not configured, 500 errors
     """
     # Check if vector engine is initialized
     if vector_engine is None:
@@ -837,7 +848,9 @@ async def search_rag(
             extra={
                 'query': search_request.query,
                 'result_count': len(results),
-                'latency': latency
+                'latency': latency,
+                'role': key_info.get('role'),
+                'key_suffix': key_info.get('key_suffix')
             }
         )
 

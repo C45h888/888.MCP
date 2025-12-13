@@ -11,12 +11,20 @@
 # Environment variables:
 #   MCP_URL: MCP server base URL (default: http://localhost:8080)
 #   MCP_API_KEY: API key for authentication (optional in dev mode)
+#   ADMIN_KEY: Admin API key (for creating test keys, optional)
+#   FEEDER_KEY: Feeder API key (for RBAC testing, optional)
+#   READONLY_KEY: Readonly API key (for RBAC testing, optional)
+#   SKIP_SECURITY_TESTS: Set to 'true' to skip RBAC/security tests
 
 set -euo pipefail
 
 # Configuration
 MCP_URL="${1:-${MCP_URL:-http://localhost:8080}}"
 API_KEY="${MCP_API_KEY:-}"
+ADMIN_KEY="${ADMIN_KEY:-}"
+FEEDER_KEY="${FEEDER_KEY:-}"
+READONLY_KEY="${READONLY_KEY:-}"
+SKIP_SECURITY_TESTS="${SKIP_SECURITY_TESTS:-false}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -231,6 +239,126 @@ main() {
         log_info "Empty query rejected (expected validation)"
     elif [ "$http_code" -eq 501 ]; then
         log_warning "RAG endpoint not configured (HTTP 501)"
+    fi
+
+    # ========================================
+    # SECURITY TESTS (Phase 6 Compliance)
+    # ========================================
+    if [ "$SKIP_SECURITY_TESTS" = "true" ]; then
+        log_warning "Skipping security tests (SKIP_SECURITY_TESTS=true)"
+    else
+        echo ""
+        echo "========================================"
+        echo "SECURITY TESTS (RBAC & Permissions)"
+        echo "========================================"
+
+        # Test 9: No API key (should fail with 401)
+        test_case "Security: No API key provided (401 expected)"
+        response=$(curl -s -w '\n%{http_code}' -X POST "$MCP_URL/tool/search_rag" \
+            -H "Content-Type: application/json" \
+            -d '{"query": "test", "limit": 3}')
+        http_code=$(echo "$response" | tail -n1)
+
+        if [ "$http_code" -eq 401 ]; then
+            log_info "✓ No API key correctly rejected (HTTP 401)"
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+        elif [ "$http_code" -eq 200 ]; then
+            log_warning "⚠ No API key allowed (dev mode enabled?)"
+        else
+            log_error "✗ Unexpected HTTP code: $http_code"
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+        fi
+
+        # Test 10: Invalid API key (should fail with 401)
+        test_case "Security: Invalid API key (401 expected)"
+        response=$(curl -s -w '\n%{http_code}' -X POST "$MCP_URL/tool/search_rag" \
+            -H "x-api-key: mcp_invalid_fakekeyfakekeyfakekeyfakekey" \
+            -H "Content-Type: application/json" \
+            -d '{"query": "test", "limit": 3}')
+        http_code=$(echo "$response" | tail -n1)
+
+        assert_error "$http_code" 401 "Invalid API key rejected"
+
+        # Test 11: RBAC - Feeder key (should fail with 403)
+        if [ -n "$FEEDER_KEY" ]; then
+            test_case "Security: Feeder key access (403 expected - RBAC)"
+            response=$(curl -s -w '\n%{http_code}' -X POST "$MCP_URL/tool/search_rag" \
+                -H "x-api-key: $FEEDER_KEY" \
+                -H "Content-Type: application/json" \
+                -d '{"query": "unauthorized query", "limit": 3}')
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+
+            if [ "$http_code" -eq 403 ]; then
+                log_info "✓ Feeder key correctly denied (HTTP 403 - RBAC working)"
+                TESTS_PASSED=$((TESTS_PASSED + 1))
+            elif [ "$http_code" -eq 200 ]; then
+                log_error "✗ RBAC VIOLATION: Feeder key allowed access!"
+                log_error "  This is a CRITICAL security issue - feeder should NOT have retrieve:rag permission"
+                TESTS_FAILED=$((TESTS_FAILED + 1))
+            else
+                log_warning "⚠ Unexpected HTTP code: $http_code"
+                echo "Response: $body"
+            fi
+        else
+            log_warning "Skipping feeder RBAC test (FEEDER_KEY not set)"
+        fi
+
+        # Test 12: RBAC - Readonly key (should fail with 403)
+        if [ -n "$READONLY_KEY" ]; then
+            test_case "Security: Readonly key access (403 expected - RBAC)"
+            response=$(curl -s -w '\n%{http_code}' -X POST "$MCP_URL/tool/search_rag" \
+                -H "x-api-key: $READONLY_KEY" \
+                -H "Content-Type: application/json" \
+                -d '{"query": "unauthorized query", "limit": 3}')
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+
+            if [ "$http_code" -eq 403 ]; then
+                log_info "✓ Readonly key correctly denied (HTTP 403 - RBAC working)"
+                TESTS_PASSED=$((TESTS_PASSED + 1))
+            elif [ "$http_code" -eq 200 ]; then
+                log_error "✗ RBAC VIOLATION: Readonly key allowed access!"
+                log_error "  This is a CRITICAL security issue - readonly should NOT have retrieve:rag permission"
+                TESTS_FAILED=$((TESTS_FAILED + 1))
+            else
+                log_warning "⚠ Unexpected HTTP code: $http_code"
+                echo "Response: $body"
+            fi
+        else
+            log_warning "Skipping readonly RBAC test (READONLY_KEY not set)"
+        fi
+
+        # Test 13: RBAC - Admin/Brain key (should succeed)
+        if [ -n "$ADMIN_KEY" ]; then
+            test_case "Security: Admin key access (200 expected - has permission)"
+            response=$(curl -s -w '\n%{http_code}' -X POST "$MCP_URL/tool/search_rag" \
+                -H "x-api-key: $ADMIN_KEY" \
+                -H "Content-Type: application/json" \
+                -d '{"query": "authorized query", "limit": 3}')
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+
+            if [ "$http_code" -eq 200 ]; then
+                log_info "✓ Admin key correctly allowed (HTTP 200 - has retrieve:rag)"
+                TESTS_PASSED=$((TESTS_PASSED + 1))
+            elif [ "$http_code" -eq 403 ]; then
+                log_error "✗ Admin key denied! Admin should have all permissions"
+                TESTS_FAILED=$((TESTS_FAILED + 1))
+            elif [ "$http_code" -eq 501 ]; then
+                log_warning "RAG endpoint not configured (HTTP 501)"
+            else
+                log_warning "⚠ Unexpected HTTP code: $http_code"
+                echo "Response: $body"
+            fi
+        else
+            log_warning "Skipping admin RBAC test (ADMIN_KEY not set)"
+            log_info "Tip: Set ADMIN_KEY, FEEDER_KEY, READONLY_KEY to run full security tests"
+        fi
+
+        echo ""
+        log_info "Security tests completed"
+        log_info "RBAC Status: ${FEEDER_KEY:+Feeder tested}${READONLY_KEY:+ Readonly tested}${ADMIN_KEY:+ Admin tested}"
     fi
 
     # Summary
